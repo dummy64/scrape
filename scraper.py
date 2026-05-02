@@ -145,12 +145,14 @@ def extract_product_detail(soup):
     # Description
     desc_div = soup.find("div", {"class": lambda c: c and "description" in c.lower()}) if soup else None
     detail["description"] = desc_div.get_text(strip=True) if desc_div else ""
-    # Images
+    # Images — only real product images, skip logos/utility
+    junk = ('logo', 'translate.gif', 'cms/utility', 'placeholder', 'loader', 'sprite', 'icon')
     detail["images"] = [
         img.get("src") or img.get("data-src")
         for img in soup.find_all("img")
         if (img.get("src") or img.get("data-src", "")).startswith("http")
         and "cdn.moglix.com" in (img.get("src") or img.get("data-src", ""))
+        and not any(j in (img.get("src") or img.get("data-src", "")).lower() for j in junk)
     ]
     return detail
 
@@ -191,8 +193,16 @@ async def scrape_category_page(page, category_url, category_name):
 
 async def scrape_product_page(page, product_url):
     """Scrape a single product page for detailed info."""
-    html = await get_page_html(page, product_url)
-    if not html:
+    try:
+        await page.goto(product_url, wait_until="domcontentloaded", timeout=30000)
+        # Wait for actual product images to load
+        try:
+            await page.wait_for_selector('img[src*="/p/"]', timeout=8000)
+        except Exception:
+            pass  # some products genuinely have no image
+        html = await page.content()
+    except Exception as e:
+        print(f"  Error loading {product_url}: {e}")
         return {}
     soup = BeautifulSoup(html, "lxml")
     return extract_product_detail(soup)
